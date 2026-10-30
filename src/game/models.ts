@@ -129,6 +129,10 @@ export interface KeiTruckRig {
   bodyGroup: THREE.Group;
   plowAssembly: THREE.Group;
   wheels: THREE.Mesh[];
+  frontWheelPivots: THREE.Group[];
+  tailLightMat: THREE.MeshStandardMaterial;
+  headlightMat: THREE.MeshStandardMaterial;
+  headlightBeams: THREE.Group;
   beaconLightMesh: THREE.Mesh;
   cocoaSteamMesh: THREE.Mesh;
 }
@@ -290,21 +294,64 @@ export function createKeiTruckModel(
   beaconLightMesh.position.set(0, 1.78, 0.55);
   bodyGroup.add(beaconLightMesh);
 
-  // 8. Twin Round Anime Headlights & Chrome Grille
+  // 8. Twin Round Anime Headlights, Volumetric Night Cones & Chrome Grille
   const headGeo = new THREE.CylinderGeometry(0.17, 0.17, 0.1, 16);
+  const headlightBeams = new THREE.Group();
+  const beamConeGeo = new THREE.ConeGeometry(1.45, 6.2, 18, 1, true);
+  // Orient cone so tip is at local (0,0,0) and wide base extends along +Z (forward)
+  beamConeGeo.translate(0, -3.1, 0);
+  beamConeGeo.rotateX(-Math.PI / 2);
+  const beamConeMat = new THREE.MeshBasicMaterial({
+    color: 0xffe599,
+    transparent: true,
+    opacity: 0.16,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+
   [-0.46, 0.46].forEach((xPos) => {
     const lamp = new THREE.Mesh(headGeo, headlightMat);
     lamp.rotation.x = Math.PI / 2;
     lamp.position.set(xPos, 0.78, 1.22);
     bodyGroup.add(lamp);
+
+    const cone = new THREE.Mesh(beamConeGeo, beamConeMat);
+    cone.position.set(xPos, 0.76, 1.26);
+    cone.rotation.x = 0.09; // Pitch slightly downward onto the snow ahead
+    headlightBeams.add(cone);
   });
+
+  // Forward headlight pool light illuminating snow drifts ahead of the blade in Night Mode
+  const headPoolLight = new THREE.PointLight(0xffe082, 4.8, 14.5, 1.5);
+  headPoolLight.position.set(0, 1.45, 4.2);
+  headlightBeams.add(headPoolLight);
+  headlightBeams.visible = false;
+  bodyGroup.add(headlightBeams);
 
   const grille = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.2, 0.08), chromeMat);
   grille.position.set(0, 0.75, 1.22);
   bodyGroup.add(grille);
 
-  // 9. Four Chunky Winter Tires with Hubcaps
+  // 9. Rear Brake / Reverse Tail Lamps
+  const tailLightMat = new THREE.MeshStandardMaterial({
+    color: 0xef4444,
+    emissive: 0x991b1b,
+    emissiveIntensity: 0.7,
+    roughness: 0.2,
+  });
+  [-0.52, 0.52].forEach((tx) => {
+    const tailLamp = new THREE.Mesh(
+      new THREE.BoxGeometry(0.24, 0.14, 0.06),
+      tailLightMat,
+    );
+    tailLamp.position.set(tx, 0.56, -1.28);
+    bodyGroup.add(tailLamp);
+  });
+
+  // 10. Four Chunky Winter Tires with Hubcaps (Front wheels mounted on steering pivots)
   const wheels: THREE.Mesh[] = [];
+  const frontWheelPivots: THREE.Group[] = [];
   const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.28, 18);
   wheelGeo.rotateZ(Math.PI / 2);
   const wheelPositions: [number, number, number][] = [
@@ -313,9 +360,8 @@ export function createKeiTruckModel(
     [-0.76, 0.34, -0.78],
     [0.76, 0.34, -0.78],
   ];
-  wheelPositions.forEach(([wx, wy, wz]) => {
+  wheelPositions.forEach(([wx, wy, wz], idx) => {
     const wheel = new THREE.Mesh(wheelGeo, darkTrimMat);
-    wheel.position.set(wx, wy, wz);
     wheel.castShadow = true;
 
     const hub = new THREE.Mesh(
@@ -323,11 +369,22 @@ export function createKeiTruckModel(
       chromeMat,
     );
     wheel.add(hub);
-    root.add(wheel);
+
+    if (idx < 2) {
+      // Front steerable wheel pivot
+      const pivot = new THREE.Group();
+      pivot.position.set(wx, wy, wz);
+      pivot.add(wheel);
+      root.add(pivot);
+      frontWheelPivots.push(pivot);
+    } else {
+      wheel.position.set(wx, wy, wz);
+      root.add(wheel);
+    }
     wheels.push(wheel);
   });
 
-  // 10. Front Hydraulic V-Plow Blade Assembly (Scales on X with blade upgrade!)
+  // 11. Front Hydraulic V-Plow Blade Assembly (Scales on X with blade upgrade!)
   const plowAssembly = new THREE.Group();
   plowAssembly.position.set(0, 0.42, 1.48);
   bodyGroup.add(plowAssembly);
@@ -391,6 +448,10 @@ export function createKeiTruckModel(
     bodyGroup,
     plowAssembly,
     wheels,
+    frontWheelPivots,
+    tailLightMat,
+    headlightMat,
+    headlightBeams,
     beaconLightMesh,
     cocoaSteamMesh,
   };

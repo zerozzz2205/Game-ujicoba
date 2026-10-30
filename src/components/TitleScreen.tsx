@@ -152,33 +152,72 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           {activeStage.subtitle}
         </p>
 
-        {/* Stage Selection Tabs (Interactive controls, locks unreached stages) */}
-        <div className="mt-5 pointer-events-auto">
-          <div className="text-xs font-semibold text-[#94a3b8] mb-2">
-            SELECT VILLAGE SHIFT · ステージ選択
+        {/* Stage Selection Grid (All 6 shifts selectable, showing Time of Day, Map Shape & Difficulty) */}
+        <div className="mt-4 pointer-events-auto max-w-xl">
+          <div className="flex items-center justify-between gap-3 text-xs font-semibold text-[#94a3b8] mb-2">
+            <span>SELECT VILLAGE SHIFT · 全6ステージ選択</span>
+            <span className="text-[#ffd166] font-mono-tabular whitespace-nowrap">
+              Goal: {activeStage.targetClearPercent}% · {activeStage.mapShapeLabel} ·{' '}
+              {activeStage.timeOfDay.toUpperCase()}
+            </span>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {STAGES.map((st) => {
-              const unlocked = st.index <= highestReachedStage;
               const isSelected = st.index === selectedStage;
+              const isCleared = st.index < highestReachedStage;
               return (
                 <button
                   key={st.id}
                   type="button"
-                  disabled={!unlocked}
                   onClick={(e) => {
                     e.currentTarget.blur();
                     onSelectStage(st.index);
                   }}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 border-2 ${
+                  className={`text-left px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border-2 ${
                     isSelected
                       ? 'bg-[#ffd166] text-[#162038] border-[#fffaf0] shadow-[0_4px_0_#162038]'
-                      : unlocked
-                        ? 'bg-[#1e2f52] text-[#fffaf0] border-[#475569] hover:border-[#ffd166]'
-                        : 'bg-[#131d33]/70 text-[#64748b] border-[#334155]/50 cursor-not-allowed'
+                      : 'bg-[#192848]/95 text-[#fffaf0] border-[#475569] hover:border-[#ffd166]'
                   }`}
                 >
-                  {st.index + 1}. {st.name} {!unlocked ? ' (Locked)' : ''}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="whitespace-nowrap">
+                      {st.index + 1}. {st.name}
+                    </span>
+                    {isCleared && (
+                      <span className={isSelected ? 'text-[#162038]' : 'text-[#ffd166]'}>
+                        ★
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className={`flex items-center justify-between gap-2 text-[10px] mt-0.5 font-semibold ${
+                      isSelected ? 'text-[#1e293b]' : 'text-[#94a3b8]'
+                    }`}
+                  >
+                    <span className="whitespace-nowrap">{st.mapShapeLabel}</span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase whitespace-nowrap shrink-0 ${
+                        st.timeOfDay === 'night'
+                          ? isSelected
+                            ? 'bg-[#162038] text-[#93c5fd]'
+                            : 'bg-[#0f172a] text-[#93c5fd]'
+                          : st.timeOfDay === 'dusk'
+                            ? isSelected
+                              ? 'bg-[#162038] text-[#fdba74]'
+                              : 'bg-[#0f172a] text-[#fdba74]'
+                            : isSelected
+                              ? 'bg-[#162038]/15 text-[#162038]'
+                              : 'bg-[#0f172a]/70 text-[#cbd5e1]'
+                      }`}
+                    >
+                      {st.timeOfDay === 'night'
+                        ? 'NIGHT'
+                        : st.timeOfDay === 'dusk'
+                          ? 'DUSK'
+                          : 'DAY'}{' '}
+                      {st.targetClearPercent}%
+                    </span>
+                  </div>
                 </button>
               );
             })}
@@ -203,7 +242,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
       {/* Single Flat Borderless Control-Hint Line in Bottom Safe Margin */}
       <div className="text-xs md:text-sm font-medium text-[#cbd5e1] tracking-wide">
-        WASD / Arrows Drive · Space Boost Plow · Click-Drag Steer · 1–4 Upgrades · Esc Pause
+        W/S Throttle &amp; Reverse · A/D Steer · Space Boost · C Camera POV · 1–4 Upgrades · Esc Pause
       </div>
     </div>
   );

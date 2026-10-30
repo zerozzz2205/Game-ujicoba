@@ -3,20 +3,26 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
   calculateClearancePercentage,
+  clampPointToMapShape,
   computeTruckStats,
+  isPointInMapShape,
   isStageTargetMet,
   registerSnowClearedOnCombo,
   STAGES,
   stepHazardBehavior,
+  stepVehicleKinematics,
   tickComboState,
   type CameraPreset,
   type ComboState,
   type GamePhase,
+  type GearState,
   type HazardArchetype,
   type HazardEntity,
   type OutcomeType,
   type RunSnapshot,
+  type TimeOfDay,
   type UpgradeLevels,
+  type VehicleKinematicsState,
 } from '../game/rules';
 import { synthAudio } from '../game/audio';
 import {
@@ -49,7 +55,10 @@ export interface HudTelemetry {
   stageIndex: number;
   stageName: string;
   stageJpName: string;
+  mapShapeLabel: string;
+  timeOfDay: TimeOfDay;
   speedKmh: number;
+  gear: GearState;
   activeCritterWarning: string | null;
 }
 
@@ -65,6 +74,7 @@ interface SnowPlowCanvasProps {
   onCoinsChange: (nextCoins: number) => void;
   onHudUpdate: (hud: HudTelemetry) => void;
   onQuickUpgradeKey: (slotIndex: number) => void;
+  onCycleCameraKey: () => void;
   onToggleDockKey: () => void;
   onToggleMuteKey: () => void;
 }
@@ -127,6 +137,7 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
   onCoinsChange,
   onHudUpdate,
   onQuickUpgradeKey,
+  onCycleCameraKey,
   onToggleDockKey,
   onToggleMuteKey,
 }) => {
@@ -144,6 +155,7 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
     onCoinsChange,
     onHudUpdate,
     onQuickUpgradeKey,
+    onCycleCameraKey,
     onToggleDockKey,
     onToggleMuteKey,
   });
@@ -160,6 +172,7 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
       onCoinsChange,
       onHudUpdate,
       onQuickUpgradeKey,
+      onCycleCameraKey,
       onToggleDockKey,
       onToggleMuteKey,
     };
@@ -256,10 +269,12 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
       [-10, 3.2, 8],
       [10, 3.2, 8],
     ];
+    const lanternLights: THREE.PointLight[] = [];
     lanternPositions.forEach(([lx, ly, lz]) => {
       const pt = new THREE.PointLight(0xff9f1c, 3.8, 13, 1.8);
       pt.position.set(lx, ly, lz);
       scene.add(pt);
+      lanternLights.push(pt);
     });
 
     // 4. Procedural Textures & Ground Surfaces (offset on Y to prevent Z-fighting)
@@ -269,50 +284,55 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
     const truckLiveryTex = createTruckLiveryTexture(maxAniso);
 
     // Extended snowy outer valley floor (160m x 160m)
+    const outerSnowFloorMat = new THREE.MeshStandardMaterial({
+      color: 0xdbeafe,
+      roughness: 0.88,
+      metalness: 0.04,
+    });
     const outerSnowFloor = new THREE.Mesh(
       new THREE.PlaneGeometry(160, 160),
-      new THREE.MeshStandardMaterial({
-        color: 0xdbeafe,
-        roughness: 0.88,
-        metalness: 0.04,
-      }),
+      outerSnowFloorMat,
     );
     outerSnowFloor.rotation.x = -Math.PI / 2;
     outerSnowFloor.position.y = -0.03;
     outerSnowFloor.receiveShadow = true;
     scene.add(outerSnowFloor);
 
-    // Playable cobblestone village plaza (y = 0.0)
-    const villagePlaza = new THREE.Mesh(
-      new THREE.CircleGeometry(27.5, 48),
-      new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        map: roadAlbedo,
-        bumpMap: roadBump,
-        bumpScale: 0.04,
-        roughness: 0.65,
-        metalness: 0.12,
-      }),
-    );
-    villagePlaza.rotation.x = -Math.PI / 2;
-    villagePlaza.position.y = 0.0;
-    villagePlaza.receiveShadow = true;
-    scene.add(villagePlaza);
+    // Reusable materials for stage-specific map shapes (circle, cross, courtyard-ring, twin-bridge, diamond)
+    const cobblePlazaMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: roadAlbedo,
+      bumpMap: roadBump,
+      bumpScale: 0.04,
+      roughness: 0.65,
+      metalness: 0.12,
+    });
+    const slateStripMat = new THREE.MeshStandardMaterial({
+      color: 0x475569,
+      map: roadAlbedo,
+      roughness: 0.58,
+      metalness: 0.15,
+    });
+    const curbStoneMat = new THREE.MeshStandardMaterial({
+      color: 0x64748b,
+      roughness: 0.78,
+      metalness: 0.1,
+    });
+    const canalIceMat = new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      emissive: 0x0284c7,
+      emissiveIntensity: 0.25,
+      roughness: 0.18,
+      metalness: 0.35,
+    });
+    const vermilionRailMat = new THREE.MeshStandardMaterial({
+      color: 0xd93829,
+      roughness: 0.45,
+      metalness: 0.1,
+    });
 
-    // Decorative shrine approach warm slate walkway strip (y = 0.012)
-    const approachStrip = new THREE.Mesh(
-      new THREE.PlaneGeometry(5.6, 46),
-      new THREE.MeshStandardMaterial({
-        color: 0x475569,
-        map: roadAlbedo,
-        roughness: 0.58,
-        metalness: 0.15,
-      }),
-    );
-    approachStrip.rotation.x = -Math.PI / 2;
-    approachStrip.position.set(0, 0.012, 0);
-    approachStrip.receiveShadow = true;
-    scene.add(approachStrip);
+    const stageMapGroup = new THREE.Group();
+    scene.add(stageMapGroup);
 
     // 5. Tall Landmarks & Village Props (Grounded at y = 0)
     const toriiGate = createToriiGateLandmark();
@@ -400,8 +420,8 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
     const truckRig = createKeiTruckModel(truckLiveryTex, shadowTex);
     scene.add(truckRig.root);
 
-    // 8. Plowable 3D Snow Field InstancedMesh (Up to 520 snow drift tiles)
-    const maxSnowCells = 520;
+    // 8. Plowable 3D Snow Field InstancedMesh (Up to 760 snow drift tiles for larger high-difficulty maps)
+    const maxSnowCells = 760;
     const snowTileGeo = new THREE.BoxGeometry(1.68, 0.58, 1.68);
     // Shift geometry so bottom is at y = 0
     snowTileGeo.translate(0, 0.29, 0);
@@ -566,10 +586,17 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
     let hazardRigs: HazardVisualRig[] = [];
 
     // Simulation state variables
-    let playerX = 0;
-    let playerZ = 8.5;
-    let playerHeading = Math.PI; // Facing North (-Z) along clear open shrine avenue
-    let playerSpeed = 0;
+    let vehicleState: VehicleKinematicsState = {
+      x: 0,
+      z: 9.0,
+      heading: Math.PI, // Facing North (-Z) along clear open shrine avenue
+      signedSpeed: 0,
+      steerAngle: 0,
+      pitchAngle: 0,
+      rollAngle: 0,
+      gear: 'N',
+      isBraking: false,
+    };
     let warmthPips = 3;
     let invulnTimer = 0;
     let boostEnergy = 100;
@@ -625,13 +652,214 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
       const stats = computeTruckStats(propsRef.current.upgradeLevels);
 
       scene.background = new THREE.Color(stage.skyTopHex);
-      scene.fog = new THREE.FogExp2(stage.skyTopHex, 0.0145);
+      scene.fog = new THREE.FogExp2(
+        stage.skyTopHex,
+        stage.timeOfDay === 'night' ? 0.0115 : 0.0135,
+      );
 
-      // Reset player on open spawn path (0, 8.5) facing clear northern avenue
-      playerX = 0;
-      playerZ = 9.0;
-      playerHeading = Math.PI;
-      playerSpeed = 0;
+      // Configure Day / Dusk / Night Lighting & Kei-Truck Headlight Beams
+      if (stage.timeOfDay === 'night') {
+        hemiLight.color.setHex(0x38bdf8);
+        hemiLight.groundColor.setHex(0x0b132b);
+        hemiLight.intensity = 0.58;
+        dirLight.color.setHex(0x93c5fd);
+        dirLight.intensity = 1.05;
+        rimLight.color.setHex(0x38bdf8);
+        rimLight.intensity = 0.95;
+        outerSnowFloorMat.color.setHex(0x1e293b);
+        cobblePlazaMat.color.setHex(0x94a3b8);
+        lanternLights.forEach((pt) => {
+          pt.intensity = 6.5;
+          pt.distance = 17.5;
+        });
+        truckRig.headlightBeams.visible = true;
+        truckRig.headlightMat.emissiveIntensity = 2.6;
+      } else if (stage.timeOfDay === 'dusk') {
+        hemiLight.color.setHex(0xfda4af);
+        hemiLight.groundColor.setHex(0x1e293b);
+        hemiLight.intensity = 0.88;
+        dirLight.color.setHex(0xfb923c);
+        dirLight.intensity = 1.68;
+        rimLight.color.setHex(0x72efdd);
+        rimLight.intensity = 0.8;
+        outerSnowFloorMat.color.setHex(0x94a3b8);
+        cobblePlazaMat.color.setHex(0xe2e8f0);
+        lanternLights.forEach((pt) => {
+          pt.intensity = 4.8;
+          pt.distance = 15;
+        });
+        truckRig.headlightBeams.visible = true;
+        truckRig.headlightMat.emissiveIntensity = 2.0;
+      } else {
+        hemiLight.color.setHex(0xa8dadc);
+        hemiLight.groundColor.setHex(0x24345a);
+        hemiLight.intensity = 1.15;
+        dirLight.color.setHex(0xffe4b5);
+        dirLight.intensity = 2.25;
+        rimLight.color.setHex(0x72efdd);
+        rimLight.intensity = 0.75;
+        outerSnowFloorMat.color.setHex(0xdbeafe);
+        cobblePlazaMat.color.setHex(0xffffff);
+        lanternLights.forEach((pt) => {
+          pt.intensity = 3.6;
+          pt.distance = 13;
+        });
+        truckRig.headlightBeams.visible = false;
+        truckRig.headlightMat.emissiveIntensity = 1.5;
+      }
+
+      // Rebuild 3D Stage Map Shape Road & Obstacles
+      stageMapGroup.clear();
+      if (stage.mapShape === 'circle') {
+        const plaza = new THREE.Mesh(new THREE.CircleGeometry(26.5, 48), cobblePlazaMat);
+        plaza.rotation.x = -Math.PI / 2;
+        plaza.receiveShadow = true;
+        stageMapGroup.add(plaza);
+
+        const strip = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 46), slateStripMat);
+        strip.rotation.x = -Math.PI / 2;
+        strip.position.set(0, 0.012, 0);
+        strip.receiveShadow = true;
+        stageMapGroup.add(strip);
+      } else if (stage.mapShape === 'cross') {
+        // Plus-shaped (+) Crossroad Market Avenues
+        const nsRoad = new THREE.Mesh(new THREE.PlaneGeometry(21.2, 48), cobblePlazaMat);
+        nsRoad.rotation.x = -Math.PI / 2;
+        nsRoad.receiveShadow = true;
+        stageMapGroup.add(nsRoad);
+
+        const ewRoad = new THREE.Mesh(new THREE.PlaneGeometry(48, 21.2), cobblePlazaMat);
+        ewRoad.rotation.x = -Math.PI / 2;
+        ewRoad.position.y = 0.004;
+        ewRoad.receiveShadow = true;
+        stageMapGroup.add(ewRoad);
+
+        const nsStrip = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 47), slateStripMat);
+        nsStrip.rotation.x = -Math.PI / 2;
+        nsStrip.position.y = 0.012;
+        nsStrip.receiveShadow = true;
+        stageMapGroup.add(nsStrip);
+
+        const ewStrip = new THREE.Mesh(new THREE.PlaneGeometry(47, 5.2), slateStripMat);
+        ewStrip.rotation.x = -Math.PI / 2;
+        ewStrip.position.y = 0.014;
+        ewStrip.receiveShadow = true;
+        stageMapGroup.add(ewStrip);
+
+        // Raised snow-covered corner plazas framing the crossroad
+        const cornerSigns: [number, number][] = [
+          [-1, -1],
+          [1, -1],
+          [-1, 1],
+          [1, 1],
+        ];
+        cornerSigns.forEach(([sx, sz]) => {
+          const curb = new THREE.Mesh(new THREE.BoxGeometry(12.5, 0.48, 12.5), curbStoneMat);
+          curb.position.set(sx * 17.2, 0.24, sz * 17.2);
+          curb.castShadow = true;
+          curb.receiveShadow = true;
+          stageMapGroup.add(curb);
+        });
+      } else if (stage.mapShape === 'courtyard-ring') {
+        // Hollow Square Courtyard Ring with Sacred Garden Island at (0, 0)
+        const outerSquare = new THREE.Mesh(new THREE.PlaneGeometry(47.5, 47.5), cobblePlazaMat);
+        outerSquare.rotation.x = -Math.PI / 2;
+        outerSquare.receiveShadow = true;
+        stageMapGroup.add(outerSquare);
+
+        // Ring walkway strips
+        [-13.5, 13.5].forEach((offset) => {
+          const hStrip = new THREE.Mesh(new THREE.PlaneGeometry(32, 4.4), slateStripMat);
+          hStrip.rotation.x = -Math.PI / 2;
+          hStrip.position.set(0, 0.012, offset);
+          stageMapGroup.add(hStrip);
+
+          const vStrip = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 32), slateStripMat);
+          vStrip.rotation.x = -Math.PI / 2;
+          vStrip.position.set(offset, 0.014, 0);
+          stageMapGroup.add(vStrip);
+        });
+
+        // Raised Central Sacred Garden Island (blocks (0,0), radius ~5m)
+        const islandBase = new THREE.Mesh(new THREE.BoxGeometry(9.6, 0.75, 9.6), curbStoneMat);
+        islandBase.position.set(0, 0.375, 0);
+        islandBase.castShadow = true;
+        islandBase.receiveShadow = true;
+        stageMapGroup.add(islandBase);
+
+        const islandSnow = new THREE.Mesh(
+          new THREE.BoxGeometry(8.6, 0.25, 8.6),
+          new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.8 }),
+        );
+        islandSnow.position.set(0, 0.85, 0);
+        stageMapGroup.add(islandSnow);
+
+        const centerLantern = createLanternPost();
+        centerLantern.position.set(0, 0.9, 0);
+        centerLantern.scale.setScalar(1.3);
+        stageMapGroup.add(centerLantern);
+      } else if (stage.mapShape === 'twin-bridge') {
+        // North and South Canal Plazas separated by a Frozen Canal & Two Stone Bridges
+        [-14.2, 14.2].forEach((pz) => {
+          const bankPlaza = new THREE.Mesh(new THREE.PlaneGeometry(47.5, 20.4), cobblePlazaMat);
+          bankPlaza.rotation.x = -Math.PI / 2;
+          bankPlaza.position.set(0, 0, pz);
+          bankPlaza.receiveShadow = true;
+          stageMapGroup.add(bankPlaza);
+        });
+
+        // Frozen shimmering canal across z ∈ [-4.0, 4.0]
+        const frozenCanal = new THREE.Mesh(new THREE.PlaneGeometry(54, 8.0), canalIceMat);
+        frozenCanal.rotation.x = -Math.PI / 2;
+        frozenCanal.position.set(0, -0.015, 0);
+        stageMapGroup.add(frozenCanal);
+
+        // Two Parallel Bridges at x = -8.8 and x = +8.8
+        [-8.8, 8.8].forEach((bx) => {
+          const bridgeDeck = new THREE.Mesh(new THREE.BoxGeometry(8.0, 0.22, 8.6), slateStripMat);
+          bridgeDeck.position.set(bx, 0.06, 0);
+          bridgeDeck.receiveShadow = true;
+          stageMapGroup.add(bridgeDeck);
+
+          // Vermilion bridge side railings
+          [-3.85, 3.85].forEach((rx) => {
+            const rail = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.72, 8.4), vermilionRailMat);
+            rail.position.set(bx + rx, 0.45, 0);
+            rail.castShadow = true;
+            stageMapGroup.add(rail);
+          });
+        });
+      } else if (stage.mapShape === 'diamond') {
+        // 45-degree rotated Alpine Diamond Plateau
+        const diamondPlaza = new THREE.Mesh(new THREE.PlaneGeometry(34, 34), cobblePlazaMat);
+        diamondPlaza.rotation.x = -Math.PI / 2;
+        diamondPlaza.rotation.z = Math.PI / 4;
+        diamondPlaza.receiveShadow = true;
+        stageMapGroup.add(diamondPlaza);
+
+        const diagStrip1 = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 42), slateStripMat);
+        diagStrip1.rotation.x = -Math.PI / 2;
+        diagStrip1.position.y = 0.012;
+        stageMapGroup.add(diagStrip1);
+
+        const diagStrip2 = new THREE.Mesh(new THREE.PlaneGeometry(42, 5.2), slateStripMat);
+        diagStrip2.rotation.x = -Math.PI / 2;
+        diagStrip2.position.y = 0.014;
+        stageMapGroup.add(diagStrip2);
+      }
+
+      // Reset player on open spawn path (0, 9.0) facing clear northern avenue
+      vehicleState = {
+        x: 0,
+        z: 9.0,
+        heading: Math.PI,
+        signedSpeed: 0,
+        steerAngle: 0,
+        pitchAngle: 0,
+        rollAngle: 0,
+        gear: 'N',
+        isBraking: false,
+      };
       warmthPips = stats.maxWarmthPips;
       invulnTimer = 0;
       boostEnergy = stats.maxBoostEnergy;
@@ -653,21 +881,23 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
         maxComboReached: 0,
       };
 
-      // Populate snow cells across the village grid, keeping a 2-tile-wide spawn pad clear around (0, 9.0)
+      // Populate snow cells matching the active stage's MapShape, keeping spawn pad (0, 9.0) clear
       snowCells.length = 0;
-      const step = 1.78;
+      const step = 1.76;
       const R = stage.gridRadius;
+      const shapeMaxExtent = Math.min(23.0, R * step);
       let cellIdx = 0;
       for (let gx = -R; gx <= R; gx++) {
         for (let gz = -R; gz <= R; gz++) {
           if (cellIdx >= maxSnowCells) break;
-          const distGrid = Math.hypot(gx, gz);
-          if (distGrid > R + 0.35) continue;
-
           const wx = gx * step;
           const wz = gz * step;
 
-          // Keep immediate spawn pad (radius 3.2m around 0, 9.0) open so player spawns on an open path
+          if (!isPointInMapShape(wx, wz, stage.mapShape, shapeMaxExtent)) {
+            continue;
+          }
+
+          // Keep immediate spawn pad (radius 3.1m around 0, 9.0) open so player spawns on an open path
           if (Math.hypot(wx - 0, wz - 9.0) < 3.1) continue;
           // Keep lantern post bases clear
           if (lanternPositions.some(([lx, , lz]) => Math.hypot(wx - lx, wz - lz) < 1.3)) {
@@ -691,25 +921,26 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
       clearedSnowCount = 0;
       updateSnowInstances();
 
-      // Seed initial Golden Coins & Cocoa Mugs along the avenue so player immediately sees pickups
+      // Seed initial Golden Coins & Cocoa Mugs inside the stage's valid map shape
       pickupsPool.forEach((p) => {
         p.active = false;
         p.mesh.visible = false;
       });
       const initialCoinCoords: [number, number][] = [
-        [0, 3.5],
-        [0, 1.2],
-        [0, -1.2],
-        [-4.5, -3.5],
-        [4.5, -3.5],
-        [-7.5, 2.5],
-        [7.5, 2.5],
+        [0, 5.5],
+        [-6.5, 6.2],
+        [6.5, 6.2],
+        [-8.2, -1.5],
+        [8.2, -1.5],
+        [-6.5, -8.5],
+        [6.5, -8.5],
       ];
       initialCoinCoords.forEach(([cx, cz], i) => {
-        spawnWorldPickup(cx, cz, i === 4 ? 'cocoa' : 'coin');
+        const validPt = clampPointToMapShape(cx, cz, stage.mapShape, 20.5);
+        spawnWorldPickup(validPt.x, validPt.z, i === 4 ? 'cocoa' : 'coin');
       });
 
-      // Rebuild Winter Critters / Hazards (3 distinct archetypes)
+      // Rebuild Winter Critters / Hazards (3 distinct archetypes) clamped inside the stage map shape
       hazardGroup.clear();
       hazards = [];
       hazardRigs = [];
@@ -718,31 +949,34 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
       for (let i = 0; i < stage.hazardBudget.chargers; i++) {
         spawnSpecs.push({
           archetype: 'charger',
-          x: i % 2 === 0 ? -11.5 : 11.5,
-          z: -6.5 - i * 4,
+          x: i % 2 === 0 ? -9.0 : 9.0,
+          z: -6.5 - i * 3.8,
           r: 4,
         });
       }
       for (let i = 0; i < stage.hazardBudget.orbiters; i++) {
         spawnSpecs.push({
           archetype: 'orbiter',
-          x: i % 2 === 0 ? 9.5 : -9.5,
-          z: 1.5 - i * 6,
-          r: 6.2,
+          x: i % 2 === 0 ? 8.8 : -8.8,
+          z: 5.5 - i * 6.5,
+          r: 5.2,
         });
       }
       for (let i = 0; i < stage.hazardBudget.kiters; i++) {
         spawnSpecs.push({
           archetype: 'kiter',
           x: i % 2 === 0 ? -6.5 : 6.5,
-          z: -12.5 + i * 4,
-          r: 4.5,
+          z: -11.5 + i * 3.5,
+          r: 4.2,
         });
       }
 
       spawnSpecs.forEach((sp, i) => {
+        const clampedSpawn = clampPointToMapShape(sp.x, sp.z, stage.mapShape, 20.0);
+        const sx = clampedSpawn.x;
+        const sz = clampedSpawn.z;
         const rig = createHazardCritterModel(sp.archetype, shadowTex);
-        rig.root.position.set(sp.x, 0, sp.z);
+        rig.root.position.set(sx, 0, sz);
         hazardGroup.add(rig.root);
         hazardRigs.push(rig);
 
@@ -751,17 +985,17 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
           archetype: sp.archetype,
           phase: 'patrol',
           phaseTimer: 1.8 + i * 0.6, // Safe opening seconds without instant attack
-          x: sp.x,
-          z: sp.z,
+          x: sx,
+          z: sz,
           vx: 0,
           vz: 0,
           heading: 0,
-          homeX: sp.x,
-          homeZ: sp.z,
+          homeX: sx,
+          homeZ: sz,
           orbitAngle: i * 1.4,
           orbitRadius: sp.r,
-          targetX: sp.x,
-          targetZ: sp.z,
+          targetX: sx,
+          targetZ: sz,
           hitFlashTimer: 0,
         });
       });
@@ -802,6 +1036,8 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
         propsRef.current.onToggleMuteKey();
       } else if (code === 'KeyH') {
         propsRef.current.onToggleDockKey();
+      } else if (code === 'KeyC') {
+        propsRef.current.onCycleCameraKey();
       } else if (p === 'playing' && code === 'KeyR') {
         buildStageWorld(propsRef.current.stageIndex);
       } else if (p === 'playing') {
@@ -986,17 +1222,17 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
         } else if (simDt > 0) {
           stageElapsedSec += simDt;
 
-          // 1. Read driving inputs (Isometric world-aligned + tank/steering options)
-          let inputX = 0;
-          let inputZ = 0;
-          if (keysHeld.has('KeyW') || keysHeld.has('ArrowUp')) inputZ -= 1;
-          if (keysHeld.has('KeyS') || keysHeld.has('ArrowDown')) inputZ += 1;
-          if (keysHeld.has('KeyA') || keysHeld.has('ArrowLeft')) inputX -= 1;
-          if (keysHeld.has('KeyD') || keysHeld.has('ArrowRight')) inputX += 1;
+          // 1. Read GTA Vehicle-Relative Driving Inputs (W/S Throttle & Reverse, A/D Front Wheel Steering)
+          let throttleInput = 0;
+          let steerInput = 0;
+          if (keysHeld.has('KeyW') || keysHeld.has('ArrowUp')) throttleInput += 1;
+          if (keysHeld.has('KeyS') || keysHeld.has('ArrowDown')) throttleInput -= 1;
+          if (keysHeld.has('KeyA') || keysHeld.has('ArrowLeft')) steerInput -= 1;
+          if (keysHeld.has('KeyD') || keysHeld.has('ArrowRight')) steerInput += 1;
 
           if (pointerSteeringActive && Math.hypot(pointerNormX, pointerNormY) > 0.08) {
-            inputX = pointerNormX;
-            inputZ = pointerNormY;
+            steerInput = Math.max(-1, Math.min(1, pointerNormX * 1.4));
+            throttleInput = Math.max(-1, Math.min(1, -pointerNormY * 1.4));
           }
 
           // Edge-triggered Boost ignition sound + continuous boost hold
@@ -1012,7 +1248,7 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
             squashZ = 1.18;
           }
 
-          if (boostHeld && boostEnergy > 2 && Math.hypot(inputX, inputZ) > 0.05) {
+          if (boostHeld && boostEnergy > 2 && throttleInput > 0.05) {
             isBoosting = true;
             boostEnergy = Math.max(0, boostEnergy - stats.boostDrainRate * simDt);
           } else {
@@ -1023,52 +1259,57 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
             );
           }
 
-          const inputLen = Math.hypot(inputX, inputZ);
+          // Step pure GTA-style vehicle kinematics constrained to active stage map shape
+          vehicleState = stepVehicleKinematics(
+            vehicleState,
+            {
+              throttleInput,
+              steerInput,
+              isBoosting,
+            },
+            stats,
+            simDt,
+            23.5,
+            stage.mapShape,
+          );
+
+          const playerX = vehicleState.x;
+          const playerZ = vehicleState.z;
+          const playerHeading = vehicleState.heading;
+          const signedSpeed = vehicleState.signedSpeed;
           const targetTopSpeed = isBoosting ? stats.boostSpeed : stats.maxSpeed;
-          if (inputLen > 0.05) {
-            const nx = inputX / inputLen;
-            const nz = inputZ / inputLen;
-            const desiredHeading = Math.atan2(nx, nz);
 
-            // Smooth shortest-angle turn
-            let diff = desiredHeading - playerHeading;
-            while (diff > Math.PI) diff -= Math.PI * 2;
-            while (diff < -Math.PI) diff += Math.PI * 2;
-            playerHeading += diff * Math.min(1, 11.5 * simDt);
-
-            playerSpeed = THREE.MathUtils.damp(
-              playerSpeed,
-              targetTopSpeed * Math.min(1, inputLen),
-              7.5,
-              simDt,
-            );
-          } else {
-            playerSpeed = THREE.MathUtils.damp(playerSpeed, 0, 8.5, simDt);
-          }
-
-          const moveX = Math.sin(playerHeading) * playerSpeed * simDt;
-          const moveZ = Math.cos(playerHeading) * playerSpeed * simDt;
-          playerX += moveX;
-          playerZ += moveZ;
-
-          // Keep truck inside circular village arena (radius 23.5m)
-          const arenaR = 23.5;
-          const pDist = Math.hypot(playerX, playerZ);
-          if (pDist > arenaR) {
-            playerX = (playerX / pDist) * arenaR;
-            playerZ = (playerZ / pDist) * arenaR;
-          }
-
-          // Update truck transform & distance-synced wheel spin + suspension bob
-          const distStep = Math.hypot(moveX, moveZ);
+          // Update truck 3D transform, front-wheel steering angle, chassis pitch/roll, and tail-lights
           truckRig.root.position.set(playerX, 0, playerZ);
           truckRig.root.rotation.y = playerHeading;
+          truckRig.frontWheelPivots.forEach((pivot) => {
+            pivot.rotation.y = vehicleState.steerAngle;
+          });
           truckRig.wheels.forEach((w) => {
-            w.rotation.x += distStep * 2.8;
+            w.rotation.x += signedSpeed * simDt * 2.8;
           });
           truckRig.bodyGroup.position.y =
-            Math.abs(Math.sin(now * 0.018)) * (playerSpeed / targetTopSpeed) * 0.06;
+            Math.abs(Math.sin(now * 0.018)) *
+            (Math.abs(signedSpeed) / Math.max(1, targetTopSpeed)) *
+            0.06;
+          truckRig.bodyGroup.rotation.x = vehicleState.pitchAngle;
+          truckRig.bodyGroup.rotation.z = vehicleState.rollAngle;
           truckRig.cocoaSteamMesh.position.y = 1.74 + Math.sin(now * 0.008) * 0.1;
+
+          // Update rear brake / reverse tail-lights
+          if (vehicleState.gear === 'R') {
+            truckRig.tailLightMat.color.setHex(0xffffff);
+            truckRig.tailLightMat.emissive.setHex(0xe2e8f0);
+            truckRig.tailLightMat.emissiveIntensity = 1.8;
+          } else if (vehicleState.isBraking) {
+            truckRig.tailLightMat.color.setHex(0xff2a2a);
+            truckRig.tailLightMat.emissive.setHex(0xef4444);
+            truckRig.tailLightMat.emissiveIntensity = 2.0;
+          } else {
+            truckRig.tailLightMat.color.setHex(0xef4444);
+            truckRig.tailLightMat.emissive.setHex(0x991b1b);
+            truckRig.tailLightMat.emissiveIntensity = 0.65;
+          }
 
           // 2. Snow Plowing Collision at the Front V-Blade & Hull
           const bladeWorldX = playerX + Math.sin(playerHeading) * 1.45;
@@ -1118,7 +1359,7 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
               } else {
                 // Partially chipped deep snow drift
                 spawnParticles(cell.x, 0.45, cell.z, 3, 'snow', 0.8);
-                playerSpeed *= 0.86;
+                vehicleState.signedSpeed *= 0.86;
               }
             }
           }
@@ -1233,6 +1474,7 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
               playerZ,
               simDt,
               canWindup,
+              stage.mapShape,
             );
             hazards[i] = res.hazard;
             const h = hazards[i];
@@ -1343,10 +1585,10 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
                   squashZ = 0.88;
                   const nx = cDist > 0.01 ? cdx / cDist : 0;
                   const nz = cDist > 0.01 ? cdz / cDist : 1;
-                  playerX += nx * 1.4;
-                  playerZ += nz * 1.4;
-                  playerSpeed = -3.5;
-                  spawnParticles(playerX, 0.8, playerZ, 20, 'frost', 1.35);
+                  vehicleState.x += nx * 1.4;
+                  vehicleState.z += nz * 1.4;
+                  vehicleState.signedSpeed = -3.5;
+                  spawnParticles(vehicleState.x, 0.8, vehicleState.z, 20, 'frost', 1.35);
                   synthAudio.playHeavyImpact(true);
 
                   if (warmthPips <= 0) {
@@ -1400,29 +1642,33 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
 
         // 6. Smooth Exponentially Damped Camera Follow + Trauma Shake
         const preset = propsRef.current.cameraPreset;
+        const px = vehicleState.x;
+        const pz = vehicleState.z;
+        const pHeading = vehicleState.heading;
         if (preset === 'isometric') {
-          _camDesired.set(playerX + 14.5, 16.5, playerZ + 14.5);
+          _camDesired.set(px + 14.5, 16.5, pz + 14.5);
         } else if (preset === 'chase') {
           _camDesired.set(
-            playerX - Math.sin(playerHeading) * 9.5,
-            8.2,
-            playerZ - Math.cos(playerHeading) * 9.5,
+            px - Math.sin(pHeading) * 9.8,
+            7.8,
+            pz - Math.cos(pHeading) * 9.8,
           );
         } else {
-          _camDesired.set(playerX * 0.35 + 19.5, 25.5, playerZ * 0.35 + 19.5);
+          _camDesired.set(px * 0.35 + 19.5, 25.5, pz * 0.35 + 19.5);
         }
 
-        const dampFactor = 1 - Math.exp(-6.5 * dt);
+        const dampFactor = 1 - Math.exp(-7.5 * dt);
         camera.position.lerp(_camDesired, dampFactor);
 
         const shakeMag = cameraTrauma * cameraTrauma * 0.65;
         const shakeX = (Math.random() - 0.5) * shakeMag;
         const shakeY = (Math.random() - 0.5) * shakeMag;
 
+        const lookAheadDist = preset === 'chase' ? 3.2 : 1.8;
         _camTarget.set(
-          playerX + Math.sin(playerHeading) * 1.8 + shakeX,
-          0.9 + shakeY,
-          playerZ + Math.cos(playerHeading) * 1.8,
+          px + Math.sin(pHeading) * lookAheadDist + shakeX,
+          1.1 + shakeY,
+          pz + Math.cos(pHeading) * lookAheadDist,
         );
         camera.lookAt(_camTarget);
       }
@@ -1466,7 +1712,10 @@ export const SnowPlowCanvas: React.FC<SnowPlowCanvasProps> = ({
           stageIndex: stage.index,
           stageName: stage.name,
           stageJpName: stage.jpName,
-          speedKmh: Math.round(Math.abs(playerSpeed) * 4.2),
+          mapShapeLabel: stage.mapShapeLabel,
+          timeOfDay: stage.timeOfDay,
+          speedKmh: Math.round(Math.abs(vehicleState.signedSpeed) * 4.2),
+          gear: vehicleState.gear,
           activeCritterWarning: warningLabel,
         });
       }

@@ -65,12 +65,19 @@ export const UPGRADE_SPECS: UpgradeSpec[] = [
   },
 ];
 
+export type MapShape = 'circle' | 'cross' | 'courtyard-ring' | 'twin-bridge' | 'diamond';
+
+export type TimeOfDay = 'day' | 'dusk' | 'night';
+
 export interface StageSpec {
   index: number;
   id: string;
   name: string;
   jpName: string;
   subtitle: string;
+  mapShape: MapShape;
+  mapShapeLabel: string;
+  timeOfDay: TimeOfDay;
   targetClearPercent: number;
   gridRadius: number;
   deepSnowRatio: number;
@@ -90,7 +97,10 @@ export const STAGES: StageSpec[] = [
     id: 'shirakawa-lane',
     name: 'Hotaru Torii Lane',
     jpName: '蛍鳥居の小道',
-    subtitle: 'Clear the shrine approach before the morning festival train arrives.',
+    subtitle: 'Clear the circular shrine approach before the morning festival train arrives.',
+    mapShape: 'circle',
+    mapShapeLabel: 'Circle Plaza',
+    timeOfDay: 'day',
     targetClearPercent: 75,
     gridRadius: 11,
     deepSnowRatio: 0.18,
@@ -105,41 +115,234 @@ export const STAGES: StageSpec[] = [
   },
   {
     index: 1,
-    id: 'onsen-plaza',
-    name: 'Yuzawa Onsen Square',
-    jpName: '湯沢温泉広場',
-    subtitle: 'Heavy powder blankets the bathhouse bridge and lantern courtyard.',
-    targetClearPercent: 80,
+    id: 'yuzawa-crossroad',
+    name: 'Yuzawa Crossroad Market',
+    jpName: '湯沢十字路市場',
+    subtitle: 'Plow the four intersecting market avenues as dusk settles over the bathhouse.',
+    mapShape: 'cross',
+    mapShapeLabel: 'Crossroad (+)',
+    timeOfDay: 'dusk',
+    targetClearPercent: 78,
     gridRadius: 12,
-    deepSnowRatio: 0.32,
+    deepSnowRatio: 0.3,
     hazardBudget: {
       chargers: 2,
       orbiters: 2,
       kiters: 1,
     },
-    clearBonusCoins: 200,
+    clearBonusCoins: 190,
     skyTopHex: 0x192549,
     skyHorizonHex: 0xe69896,
   },
   {
     index: 2,
-    id: 'starlight-summit',
-    name: 'Hokkaido Starlight Pass',
-    jpName: '星降る峠駅',
-    subtitle: 'Blizzard drifts and lively frost spirits guard the mountain station.',
-    targetClearPercent: 85,
-    gridRadius: 13,
-    deepSnowRatio: 0.45,
+    id: 'gion-moonlit-courtyard',
+    name: 'Gion Moonlit Courtyard',
+    jpName: '祇園月夜の回廊',
+    subtitle: 'Night shift! Switch on your headlights and circle the sacred garden courtyard.',
+    mapShape: 'courtyard-ring',
+    mapShapeLabel: 'Courtyard Ring',
+    timeOfDay: 'night',
+    targetClearPercent: 82,
+    gridRadius: 12,
+    deepSnowRatio: 0.38,
     hazardBudget: {
       chargers: 2,
       orbiters: 2,
       kiters: 2,
     },
-    clearBonusCoins: 320,
-    skyTopHex: 0x101830,
-    skyHorizonHex: 0x7b96d4,
+    clearBonusCoins: 270,
+    skyTopHex: 0x070c1b,
+    skyHorizonHex: 0x1b2a4a,
+  },
+  {
+    index: 3,
+    id: 'otaru-twin-bridges',
+    name: 'Otaru Canal Twin Bridges',
+    jpName: '小樽運河・双子橋',
+    subtitle: 'Navigate two icy stone bridges spanning the frozen midnight canal.',
+    mapShape: 'twin-bridge',
+    mapShapeLabel: 'Twin Bridges',
+    timeOfDay: 'night',
+    targetClearPercent: 85,
+    gridRadius: 13,
+    deepSnowRatio: 0.46,
+    hazardBudget: {
+      chargers: 3,
+      orbiters: 2,
+      kiters: 2,
+    },
+    clearBonusCoins: 360,
+    skyTopHex: 0x050914,
+    skyHorizonHex: 0x152238,
+  },
+  {
+    index: 4,
+    id: 'zao-diamond-pass',
+    name: 'Zao Diamond Switchback',
+    jpName: '蔵王ダイヤ峠',
+    subtitle: 'Steep diamond ridge packed with thick glacial drifts and aggressive snow-boars.',
+    mapShape: 'diamond',
+    mapShapeLabel: 'Alpine Diamond',
+    timeOfDay: 'day',
+    targetClearPercent: 88,
+    gridRadius: 13,
+    deepSnowRatio: 0.54,
+    hazardBudget: {
+      chargers: 3,
+      orbiters: 3,
+      kiters: 2,
+    },
+    clearBonusCoins: 460,
+    skyTopHex: 0x16284c,
+    skyHorizonHex: 0x93c5fd,
+  },
+  {
+    index: 5,
+    id: 'kurobe-midnight-citadel',
+    name: 'Kurobe Midnight Blizzard',
+    jpName: '黒部真夜中の吹雪',
+    subtitle: 'Extreme night blizzard across the grand crossroad! Maximum frost spirit activity.',
+    mapShape: 'cross',
+    mapShapeLabel: 'Grand Cross (+)',
+    timeOfDay: 'night',
+    targetClearPercent: 90,
+    gridRadius: 14,
+    deepSnowRatio: 0.62,
+    hazardBudget: {
+      chargers: 3,
+      orbiters: 3,
+      kiters: 3,
+    },
+    clearBonusCoins: 620,
+    skyTopHex: 0x040711,
+    skyHorizonHex: 0x111c33,
   },
 ];
+
+/**
+ * Pure geometric test for whether a world coordinate (x, z) lies inside the active stage's map shape.
+ */
+export function isPointInMapShape(
+  x: number,
+  z: number,
+  shape: MapShape,
+  maxExtent = 23.5,
+): boolean {
+  const ax = Math.abs(x);
+  const az = Math.abs(z);
+
+  if (shape === 'circle') {
+    return Math.hypot(x, z) <= maxExtent;
+  }
+  if (shape === 'cross') {
+    const armHalf = maxExtent * 0.44;
+    return ax <= maxExtent && az <= maxExtent && (ax <= armHalf || az <= armHalf);
+  }
+  if (shape === 'courtyard-ring') {
+    const innerIsland = 5.0;
+    return ax <= maxExtent && az <= maxExtent && !(ax < innerIsland && az < innerIsland);
+  }
+  if (shape === 'twin-bridge') {
+    if (ax > maxExtent || az > maxExtent) return false;
+    const canalHalfZ = 4.0;
+    if (az < canalHalfZ) {
+      // Must be on West Bridge [-12.8, -4.8] or East Bridge [4.8, 12.8]
+      return ax >= 4.8 && ax <= 12.8;
+    }
+    return true;
+  }
+  if (shape === 'diamond') {
+    return ax <= maxExtent && az <= maxExtent && ax + az <= maxExtent * 1.28;
+  }
+  return Math.hypot(x, z) <= maxExtent;
+}
+
+/**
+ * Clamps a world position (x, z) to stay inside the playable road surface of the given MapShape.
+ */
+export function clampPointToMapShape(
+  x: number,
+  z: number,
+  shape: MapShape,
+  maxExtent = 23.5,
+): { x: number; z: number; clamped: boolean } {
+  let nx = x;
+  let nz = z;
+  let clamped = false;
+
+  if (shape === 'circle') {
+    const d = Math.hypot(nx, nz);
+    if (d > maxExtent) {
+      nx = (nx / d) * maxExtent;
+      nz = (nz / d) * maxExtent;
+      clamped = true;
+    }
+    return { x: nx, z: nz, clamped };
+  }
+
+  // Outer square clamp for all non-circular shapes
+  if (Math.abs(nx) > maxExtent) {
+    nx = Math.sign(nx) * maxExtent;
+    clamped = true;
+  }
+  if (Math.abs(nz) > maxExtent) {
+    nz = Math.sign(nz) * maxExtent;
+    clamped = true;
+  }
+
+  if (shape === 'cross') {
+    const armHalf = maxExtent * 0.44;
+    const ax = Math.abs(nx);
+    const az = Math.abs(nz);
+    if (ax > armHalf && az > armHalf) {
+      if (ax - armHalf < az - armHalf) {
+        nx = Math.sign(nx) * armHalf;
+      } else {
+        nz = Math.sign(nz) * armHalf;
+      }
+      clamped = true;
+    }
+  } else if (shape === 'courtyard-ring') {
+    const innerIsland = 5.0;
+    const ax = Math.abs(nx);
+    const az = Math.abs(nz);
+    if (ax < innerIsland && az < innerIsland) {
+      if (innerIsland - ax < innerIsland - az) {
+        nx = (nx >= 0 ? 1 : -1) * innerIsland;
+      } else {
+        nz = (nz >= 0 ? 1 : -1) * innerIsland;
+      }
+      clamped = true;
+    }
+  } else if (shape === 'twin-bridge') {
+    const canalHalfZ = 4.0;
+    const ax = Math.abs(nx);
+    const az = Math.abs(nz);
+    if (az < canalHalfZ && (ax < 4.8 || ax > 12.8)) {
+      const distToBank = canalHalfZ - az;
+      const distToBridge = ax < 4.8 ? 4.8 - ax : ax - 12.8;
+      if (distToBank <= distToBridge) {
+        nz = (nz >= 0 ? 1 : -1) * canalHalfZ;
+      } else {
+        const targetX = ax < 4.8 ? 4.8 : 12.8;
+        nx = (nx >= 0 ? 1 : -1) * targetX;
+      }
+      clamped = true;
+    }
+  } else if (shape === 'diamond') {
+    const limit = maxExtent * 1.28;
+    const sum = Math.abs(nx) + Math.abs(nz);
+    if (sum > limit) {
+      const excess = (sum - limit) * 0.5;
+      nx -= Math.sign(nx) * excess;
+      nz -= Math.sign(nz) * excess;
+      clamped = true;
+    }
+  }
+
+  return { x: nx, z: nz, clamped };
+}
 
 export interface DerivedTruckStats {
   plowWidth: number;
@@ -349,6 +552,7 @@ export function stepHazardBehavior(
   playerZ: number,
   dt: number,
   canStartWindup: boolean,
+  mapShape: MapShape = 'circle',
 ): { hazard: HazardEntity; triggeredWindup: boolean; triggeredFrostPulse: boolean } {
   const next: HazardEntity = {
     ...h,
@@ -516,10 +720,148 @@ export function stepHazardBehavior(
     }
   }
 
-  // Keep within playable boundary
-  const maxBound = 24;
-  next.x = Math.max(-maxBound, Math.min(maxBound, next.x));
-  next.z = Math.max(-maxBound, Math.min(maxBound, next.z));
+  // Keep within playable map shape boundary
+  const maxBound = 23.0;
+  const clampedH = clampPointToMapShape(next.x, next.z, mapShape, maxBound);
+  next.x = clampedH.x;
+  next.z = clampedH.z;
 
   return { hazard: next, triggeredWindup, triggeredFrostPulse };
 }
+
+export type GearState = 'D' | 'R' | 'N';
+
+export interface VehicleKinematicsState {
+  x: number;
+  z: number;
+  heading: number;
+  signedSpeed: number; // + forward along nose, - reverse
+  steerAngle: number; // radians (+ = left turn around +Y, - = right turn around +Y)
+  pitchAngle: number; // radians (+ = nose dive on brake, - = squat on throttle)
+  rollAngle: number; // radians (body roll in turns)
+  gear: GearState;
+  isBraking: boolean;
+}
+
+export interface VehicleControlInput {
+  throttleInput: number; // -1 (S / Down) .. +1 (W / Up)
+  steerInput: number; // -1 (A / Left) .. +1 (D / Right)
+  isBoosting: boolean;
+}
+
+export const CAMERA_PRESET_ORDER: CameraPreset[] = ['chase', 'isometric', 'overview'];
+
+export function cycleCameraPreset(current: CameraPreset): CameraPreset {
+  const idx = CAMERA_PRESET_ORDER.indexOf(current);
+  if (idx === -1) return 'chase';
+  return CAMERA_PRESET_ORDER[(idx + 1) % CAMERA_PRESET_ORDER.length];
+}
+
+/**
+ * Pure GTA-style vehicle-relative kinematics step:
+ * - W / Up (+throttleInput): accelerates forward along the truck's nose heading (or brakes if reversing).
+ * - S / Down (-throttleInput): brakes while moving forward; once slowed near zero, shifts into Reverse ('R') and backs up.
+ * - A / D (steerInput): pivots the front wheels up to ±32° (0.56 rad). Yaw turn rate scales with forward/reverse velocity and naturally inverts when backing up.
+ */
+export function stepVehicleKinematics(
+  state: VehicleKinematicsState,
+  input: VehicleControlInput,
+  stats: DerivedTruckStats,
+  dt: number,
+  arenaRadius = 23.5,
+  mapShape: MapShape = 'circle',
+): VehicleKinematicsState {
+  const maxForward = input.isBoosting ? stats.boostSpeed : stats.maxSpeed;
+  const maxReverse = stats.maxSpeed * 0.58;
+  const maxSteerRad = 0.56; // ~32 degrees front wheel lock
+
+  // Positive rotation around +Y is Left from the vehicle's POV
+  const targetSteerAngle = -input.steerInput * maxSteerRad;
+  const steerBlend = 1 - Math.exp(-12 * dt);
+  const steerAngle = state.steerAngle + (targetSteerAngle - state.steerAngle) * steerBlend;
+
+  let signedSpeed = state.signedSpeed;
+  let isBraking = false;
+  let targetPitch = 0;
+
+  if (input.throttleInput > 0.05) {
+    if (signedSpeed < -0.25) {
+      // Braking from reverse
+      isBraking = true;
+      signedSpeed = Math.min(0, signedSpeed + 28 * dt);
+      targetPitch = -0.05;
+    } else {
+      // Forward acceleration
+      const accel = (input.isBoosting ? 24 : 15.5) * input.throttleInput;
+      signedSpeed = Math.min(maxForward, signedSpeed + accel * dt);
+      targetPitch = input.isBoosting ? -0.065 : -0.035;
+    }
+  } else if (input.throttleInput < -0.05) {
+    const revMag = Math.abs(input.throttleInput);
+    if (signedSpeed > 0.4) {
+      // Braking from forward motion before reversing
+      isBraking = true;
+      signedSpeed = Math.max(0, signedSpeed - 30 * revMag * dt);
+      targetPitch = 0.06; // Nose dips forward under braking
+    } else {
+      // Shift into Reverse gear and accelerate backward
+      const revAccel = 12.5 * revMag;
+      signedSpeed = Math.max(-maxReverse, signedSpeed - revAccel * dt);
+      targetPitch = 0.025;
+    }
+  } else {
+    // Natural snow rolling friction / engine coasting
+    const drag = Math.exp(-4.2 * dt);
+    signedSpeed *= drag;
+    if (Math.abs(signedSpeed) < 0.08) {
+      signedSpeed = 0;
+    }
+    targetPitch = 0;
+  }
+
+  // Ackermann-inspired speed-coupled yaw rate (no spinning in place at 0 speed; inverts in reverse)
+  const absSpeed = Math.abs(signedSpeed);
+  let yawRate = 0;
+  if (absSpeed > 0.12) {
+    const wheelBase = 2.15;
+    const highSpeedTaper = 1 / (1 + absSpeed * 0.042);
+    yawRate = steerAngle * (signedSpeed / wheelBase) * 1.45 * highSpeedTaper;
+  }
+
+  let heading = state.heading + yawRate * dt;
+  // Normalize heading to (-PI, PI]
+  while (heading > Math.PI) heading -= Math.PI * 2;
+  while (heading <= -Math.PI) heading += Math.PI * 2;
+
+  let x = state.x + Math.sin(heading) * signedSpeed * dt;
+  let z = state.z + Math.cos(heading) * signedSpeed * dt;
+
+  // Keep inside active stage map shape boundary
+  const boundaryRes = clampPointToMapShape(x, z, mapShape, arenaRadius);
+  if (boundaryRes.clamped) {
+    x = boundaryRes.x;
+    z = boundaryRes.z;
+    signedSpeed *= 0.78;
+  }
+
+  const targetRoll = -yawRate * (absSpeed / Math.max(1, stats.maxSpeed)) * 0.055;
+  const attBlend = 1 - Math.exp(-10 * dt);
+  const pitchAngle = state.pitchAngle + (targetPitch - state.pitchAngle) * attBlend;
+  const rollAngle = state.rollAngle + (targetRoll - state.rollAngle) * attBlend;
+
+  const gear: GearState =
+    signedSpeed < -0.15 ? 'R' : signedSpeed > 0.15 || input.throttleInput > 0 ? 'D' : 'N';
+
+  return {
+    x,
+    z,
+    heading,
+    signedSpeed,
+    steerAngle,
+    pitchAngle,
+    rollAngle,
+    gear,
+    isBraking,
+  };
+}
+

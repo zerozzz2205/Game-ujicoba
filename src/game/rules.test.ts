@@ -4,16 +4,22 @@ import {
   calculateClearancePercentage,
   calculateComboMultiplier,
   canPurchaseUpgrade,
+  clampPointToMapShape,
   computeTruckStats,
+  cycleCameraPreset,
   getUpgradeCost,
+  isPointInMapShape,
   isStageTargetMet,
   purchaseUpgrade,
   registerSnowClearedOnCombo,
+  STAGES,
   stepHazardBehavior,
+  stepVehicleKinematics,
   tickComboState,
   type ComboState,
   type HazardEntity,
   type UpgradeLevels,
+  type VehicleKinematicsState,
 } from './rules';
 
 test('combo multiplier scales across thresholds and resets after timer expiry', () => {
@@ -123,3 +129,111 @@ test('three hazard archetypes execute distinct movement policies and windup tele
   const kiterMove = stepHazardBehavior(kiter, 3, 0, 0.1, true);
   assert.ok(kiterMove.hazard.x < 0, 'kiter kites away from player on +X');
 });
+
+test('GTA vehicle kinematics: forward throttle, speed-scaled turning, braking, and reverse gear', () => {
+  const stats = computeTruckStats({ blade: 1, engine: 1, heater: 1, magnet: 1 });
+  let v: VehicleKinematicsState = {
+    x: 0,
+    z: 0,
+    heading: 0,
+    signedSpeed: 0,
+    steerAngle: 0,
+    pitchAngle: 0,
+    rollAngle: 0,
+    gear: 'N',
+    isBraking: false,
+  };
+
+  // 1. Steering while stationary pivots front wheels without spinning the truck in place
+  v = stepVehicleKinematics(
+    v,
+    { throttleInput: 0, steerInput: -1, isBoosting: false },
+    stats,
+    0.1,
+    30,
+  );
+  assert.ok(v.steerAngle > 0, 'Left steer input pivots front wheels positive');
+  assert.equal(v.heading, 0, 'Truck does not spin in place at zero speed');
+
+  // 2. Forward throttle + Left steer accelerates along heading and turns counter-clockwise (+heading)
+  for (let i = 0; i < 10; i++) {
+    v = stepVehicleKinematics(
+      v,
+      { throttleInput: 1, steerInput: -1, isBoosting: false },
+      stats,
+      0.05,
+      30,
+    );
+  }
+  assert.equal(v.gear, 'D');
+  assert.ok(v.signedSpeed > 4, 'Truck accelerates forward in Drive gear');
+  assert.ok(v.heading > 0.1, 'Truck turns left (+heading) when moving forward with left steer');
+
+  // 3. Pressing S while moving forward brakes first, then engages Reverse ('R')
+  const speedBeforeBrake = v.signedSpeed;
+  v = stepVehicleKinematics(
+    v,
+    { throttleInput: -1, steerInput: 0, isBoosting: false },
+    stats,
+    0.05,
+    30,
+  );
+  assert.ok(v.signedSpeed < speedBeforeBrake, 'Holding S while moving forward applies brakes');
+  assert.equal(v.isBraking, true);
+
+  for (let i = 0; i < 25; i++) {
+    v = stepVehicleKinematics(
+      v,
+      { throttleInput: -1, steerInput: 0, isBoosting: false },
+      stats,
+      0.05,
+      30,
+    );
+  }
+  assert.equal(v.gear, 'R', 'Holding S after stopping engages Reverse gear');
+  assert.ok(v.signedSpeed < -1, 'Truck moves backward in Reverse gear');
+
+  // 4. Camera preset cycling order
+  assert.equal(cycleCameraPreset('chase'), 'isometric');
+  assert.equal(cycleCameraPreset('isometric'), 'overview');
+  assert.equal(cycleCameraPreset('overview'), 'chase');
+});
+
+test('six escalating stages include night mode shifts and non-circular map geometry', () => {
+  assert.equal(STAGES.length, 6);
+  const nightStages = STAGES.filter((s) => s.timeOfDay === 'night');
+  assert.ok(nightStages.length >= 3, 'At least 3 stages feature night mode');
+
+  const nonCircleShapes = new Set(
+    STAGES.filter((s) => s.mapShape !== 'circle').map((s) => s.mapShape),
+  );
+  assert.ok(nonCircleShapes.has('cross'));
+  assert.ok(nonCircleShapes.has('courtyard-ring'));
+  assert.ok(nonCircleShapes.has('twin-bridge'));
+  assert.ok(nonCircleShapes.has('diamond'));
+
+  // Escalating clearance target and deep snow ratio from Stage 0 to Stage 5
+  assert.ok(STAGES[5].targetClearPercent > STAGES[0].targetClearPercent);
+  assert.ok(STAGES[5].deepSnowRatio > STAGES[0].deepSnowRatio);
+
+  // Verify spawn point (0, 9.0) is inside every stage map shape
+  for (const st of STAGES) {
+    assert.equal(
+      isPointInMapShape(0, 9.0, st.mapShape, 23.0),
+      true,
+      `Spawn pad (0, 9) must be inside ${st.mapShape}`,
+    );
+  }
+
+  // Courtyard-ring blocks center (0, 0) and clamps out to ±5.0
+  assert.equal(isPointInMapShape(0, 0, 'courtyard-ring', 23.0), false);
+  const clampedCenter = clampPointToMapShape(1.2, 0.5, 'courtyard-ring', 23.0);
+  assert.equal(clampedCenter.clamped, true);
+  assert.ok(Math.abs(clampedCenter.x) >= 5.0 || Math.abs(clampedCenter.z) >= 5.0);
+
+  // Twin-bridge allows crossing at x = 8.8, z = 0, but blocks canal center (0, 0)
+  assert.equal(isPointInMapShape(8.8, 0, 'twin-bridge', 23.0), true);
+  assert.equal(isPointInMapShape(0, 0, 'twin-bridge', 23.0), false);
+});
+
+

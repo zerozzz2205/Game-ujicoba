@@ -169,12 +169,31 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
           </div>
 
-          {/* Snow Clearance Goal Bar */}
+          {/* Snow Clearance Goal Bar + Stage Time/Shape Metadata */}
           <div className="mt-2.5">
-            <div className="flex items-center justify-between gap-4 text-[11px] font-bold">
-              <span className="text-[#94a3b8] uppercase tracking-wider whitespace-nowrap">
-                {hud.stageName}
-              </span>
+            <div className="flex items-center justify-between gap-3 text-[11px] font-bold">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[#94a3b8] uppercase tracking-wider truncate">
+                  {hud.stageName}
+                </span>
+                <span
+                  data-testid="hud-stage-meta"
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 border ${
+                    hud.timeOfDay === 'night'
+                      ? 'bg-[#1e1b4b] text-[#93c5fd] border-[#60a5fa]/50'
+                      : hud.timeOfDay === 'dusk'
+                        ? 'bg-[#431407] text-[#fdba74] border-[#fb923c]/50'
+                        : 'bg-[#1e293b] text-[#cbd5e1] border-[#475569]/50'
+                  }`}
+                >
+                  {hud.timeOfDay === 'night'
+                    ? 'NIGHT'
+                    : hud.timeOfDay === 'dusk'
+                      ? 'DUSK'
+                      : 'DAY'}{' '}
+                  · {hud.mapShapeLabel}
+                </span>
+              </div>
               <span
                 data-testid="hud-clearance"
                 className="font-mono-tabular text-[#72efdd] whitespace-nowrap shrink-0"
@@ -182,7 +201,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 {Math.round(hud.clearedPercent)}% / {Math.round(hud.targetPercent)}%
               </span>
             </div>
-            <div className="w-60 h-2.5 rounded-full bg-[#0f172a] border border-[#fff5e4]/20 overflow-hidden mt-1">
+            <div className="w-72 h-2.5 rounded-full bg-[#0f172a] border border-[#fff5e4]/20 overflow-hidden mt-1">
               <div
                 className="h-full bg-[#72efdd] transition-transform duration-150 origin-left"
                 style={{ transform: `scaleX(${clearanceProgressRatio})` }}
@@ -239,15 +258,27 @@ export const GameHud: React.FC<GameHudProps> = ({
 
             <div className="h-9 w-[1px] bg-[#fff5e4]/15 hidden sm:block" />
 
-            {/* Cocoa Heater Boost Tank Gauge */}
+            {/* Cocoa Heater Boost Tank Gauge & Gear/Speed Readout */}
             <div className="hidden sm:block">
-              <div className="flex items-center justify-between gap-2 text-[10px] font-bold tracking-wider uppercase">
-                <span className="text-[#ff9f1c]">BOOST [SPACE]</span>
-                <span className="font-mono-tabular text-[#fffaf0]">
-                  {Math.round(hud.speedKmh)} km/h
+              <div className="flex items-center justify-between gap-2.5 text-[10px] font-bold tracking-wider uppercase">
+                <span className="text-[#ff9f1c] whitespace-nowrap">BOOST [SPACE]</span>
+                <span className="flex items-center gap-1.5 font-mono-tabular whitespace-nowrap">
+                  <span
+                    data-testid="hud-gear"
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold leading-none border ${
+                      hud.gear === 'R'
+                        ? 'bg-[#ff4d6d] text-[#fffaf0] border-[#fffaf0]'
+                        : hud.gear === 'D'
+                          ? 'bg-[#72efdd] text-[#0f172a] border-[#72efdd]'
+                          : 'bg-[#1e293b] text-[#94a3b8] border-[#475569]'
+                    }`}
+                  >
+                    {hud.gear}
+                  </span>
+                  <span className="text-[#fffaf0]">{Math.round(hud.speedKmh)} km/h</span>
                 </span>
               </div>
-              <div className="w-28 h-2.5 bg-[#0f172a] rounded-full border border-[#fff5e4]/20 overflow-hidden mt-1.5">
+              <div className="w-36 h-2.5 bg-[#0f172a] rounded-full border border-[#fff5e4]/20 overflow-hidden mt-1.5">
                 <div
                   className="h-full bg-[#ff7847] origin-left transition-transform duration-75"
                   style={{
@@ -401,9 +432,12 @@ export const GameHud: React.FC<GameHudProps> = ({
               })}
             </div>
 
-            {/* Camera Angle Switcher */}
+            {/* Camera Angle Switcher [C] */}
             <div className="flex items-center gap-1 bg-[#0f172a] p-1 rounded-xl border border-[#fff5e4]/15 shrink-0">
-              {(['isometric', 'chase', 'overview'] as CameraPreset[]).map((preset) => (
+              <span className="px-2 text-[10px] font-bold tracking-wider text-[#94a3b8] uppercase whitespace-nowrap">
+                POV [C]
+              </span>
+              {(['chase', 'isometric', 'overview'] as CameraPreset[]).map((preset) => (
                 <button
                   key={preset}
                   type="button"

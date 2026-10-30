@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
+  cycleCameraPreset,
   purchaseUpgrade,
   STAGES,
   UPGRADE_SPECS,
@@ -32,11 +33,20 @@ export default function App() {
     return 'title';
   });
 
-  const [stageIndex, setStageIndex] = useState<number>(0);
+  const [stageIndex, setStageIndex] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const rawStage = Number(params.get('stage'));
+      if (!Number.isNaN(rawStage) && rawStage >= 0 && rawStage < STAGES.length) {
+        return Math.floor(rawStage);
+      }
+    }
+    return 0;
+  });
   const [highestReachedStage, setHighestReachedStage] = useState<number>(0);
   const [coins, setCoins] = useState<number>(60); // Seeded starting Yen so players can immediately test an upgrade
   const [bestScore, setBestScore] = useState<number>(0);
-  const [cameraPreset, setCameraPreset] = useState<CameraPreset>('isometric');
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset>('chase');
   const [dockCollapsed, setDockCollapsed] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [resetSignal, setResetSignal] = useState<number>(0);
@@ -66,7 +76,10 @@ export default function App() {
     stageIndex: 0,
     stageName: STAGES[0].name,
     stageJpName: STAGES[0].jpName,
+    mapShapeLabel: STAGES[0].mapShapeLabel,
+    timeOfDay: STAGES[0].timeOfDay,
     speedKmh: 0,
+    gear: 'N',
     activeCritterWarning: null,
   });
 
@@ -159,6 +172,10 @@ export default function App() {
     setDockCollapsed((prev) => !prev);
   }, []);
 
+  const handleCycleCamera = useCallback(() => {
+    setCameraPreset((prev) => cycleCameraPreset(prev));
+  }, []);
+
   return (
     <main className="relative w-full h-full overflow-hidden select-none">
       {/* Isolated Three.js WebGL Viewport Container */}
@@ -176,6 +193,7 @@ export default function App() {
         onQuickUpgradeKey={handleQuickUpgradeKey}
         onToggleDockKey={handleToggleDock}
         onToggleMuteKey={handleToggleMute}
+        onCycleCameraKey={handleCycleCamera}
       />
 
       {/* Title Screen Overlay */}
