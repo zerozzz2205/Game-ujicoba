@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan for upgrading YukiPlow: Cozy Winter Express with vehicle-relative GTA-style driving physics (throttle, braking, reverse gear, speed-dependent Ackermann steering, front wheel visual steering angles, chassis body roll) and toggleable Chase POV / Isometric camera modes.",
+  "updatedAt":  "2026-10-30T08:22:27.030449400Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

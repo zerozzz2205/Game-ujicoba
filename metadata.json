@@ -1,0 +1,6 @@
+{
+  "name": "YukiPlow: Cozy Winter Express",
+  "description": "A cozy 3D isometric anime snow-plowing game with kei-truck upgrades, combo multipliers, winter village stages, and procedural synth sound effects.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
